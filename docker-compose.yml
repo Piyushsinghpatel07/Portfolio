@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: portfolio_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - portfolio_net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: portfolio_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+    depends_on:
+      - mongodb
+    networks:
+      - portfolio_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: portfolio_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - portfolio_net
+
+networks:
+  portfolio_net:
+    driver: bridge
+
+volumes:
+  mongo_data:
