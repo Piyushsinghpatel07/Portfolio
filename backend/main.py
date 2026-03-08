@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
-from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
+import resend
 import os
 from dotenv import load_dotenv
 from datetime import datetime
@@ -26,19 +26,8 @@ MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 client = AsyncIOMotorClient(MONGODB_URL)
 db = client["portfolio"]
 
-# Mail Configuration
-conf = ConnectionConfig(
-    MAIL_USERNAME=os.getenv("MAIL_USERNAME"),
-    MAIL_PASSWORD=os.getenv("MAIL_PASSWORD"),
-    MAIL_FROM=os.getenv("MAIL_FROM"),
-    MAIL_PORT=int(os.getenv("MAIL_PORT", 587)),
-    MAIL_SERVER=os.getenv("MAIL_SERVER"),
-    MAIL_FROM_NAME=os.getenv("MAIL_FROM_NAME"),
-    MAIL_STARTTLS=os.getenv("MAIL_STARTTLS", "True").lower() == "true",
-    MAIL_SSL_TLS=os.getenv("MAIL_SSL_TLS", "False").lower() == "true",
-    USE_CREDENTIALS=True,
-    VALIDATE_CERTS=True
-)
+# Resend Configuration
+resend.api_key = os.getenv("RESEND_API_KEY")
 
 # ─── Pydantic Models ────────────────────────────────────────────────────────
 class ContactMessage(BaseModel):
@@ -176,7 +165,6 @@ async def send_message(contact: ContactMessage, background_tasks: BackgroundTask
         }
         await db["contacts"].insert_one(doc)
 
-        # 2. Send Email (in background)
         email_content = f"""
         <h3>New Contact Message from Portfolio</h3>
         <p><strong>Name:</strong> {contact.name}</p>
@@ -184,16 +172,7 @@ async def send_message(contact: ContactMessage, background_tasks: BackgroundTask
         <p><strong>Message:</strong></p>
         <p>{contact.message}</p>
         """
-
-        message = MessageSchema(
-            subject=f"New Portfolio Message from {contact.name}",
-            recipients=[os.getenv("MAIL_FROM")],
-            body=email_content,
-            subtype=MessageType.html
-        )
-
-        fm = FastMail(conf)
-        background_tasks.add_task(fm.send_message, message)
+        background_tasks.add_task(send_resend_email, contact, email_content)
 
         return ContactResponse(success=True, message="Message sent successfully!")
     except Exception as e:
@@ -207,6 +186,18 @@ async def get_projects():
     async for p in db["projects"].find({}, {"_id": 0}):
         projects.append(p)
     return projects
+
+
+async def send_resend_email(contact: ContactMessage, html_content: str):
+    try:
+        resend.Emails.send({
+            "from": "Portfolio <onboarding@resend.dev>",
+            "to": [os.getenv("MAIL_FROM")],
+            "subject": f"New Portfolio Message from {contact.name}",
+            "html": html_content
+        })
+    except Exception as e:
+        print(f"Resend error: {e}")
 
 
 @app.get("/skills", response_model=List[dict], tags=["Skills"])
